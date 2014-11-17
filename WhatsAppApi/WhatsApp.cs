@@ -8,6 +8,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Web.Script.Serialization;
 using WhatsAppApi.Helper;
 using WhatsAppApi.Parser;
@@ -254,26 +255,38 @@ namespace WhatsAppApi
                 new KeyValue("type", "set"),
                 new KeyValue("xmlns", "w:m")
             }, media);
-            this.uploadResponse = null;
+
+            ProtocolTreeNode uploadResponse = null;
             this.SendNode(node);
             int i = 0;
-            while (this.uploadResponse == null && i <= 10)
+
+            do{
+                if (!IsUserPolling)
+                {
+                    this.pollMessage();
+                }
+                lock (this.uploadResponses)
+                {
+                    if (uploadResponses.TryGetValue(id, out uploadResponse))
+                    {
+                        uploadResponses.Remove(id);
+                        break;
+                    }
+                }
+                Thread.Sleep(200);
+                ++i;
+            }while(i <= 10);
+
+            if (uploadResponse != null && uploadResponse.GetChild("duplicate") != null)
             {
-                i++;
-                this.pollMessage();
-            }
-            if (this.uploadResponse != null && this.uploadResponse.GetChild("duplicate") != null)
-            {
-                WaUploadResponse res = new WaUploadResponse(this.uploadResponse);
-                this.uploadResponse = null;
+                WaUploadResponse res = new WaUploadResponse(uploadResponse);
                 return res;
             }
             else
             {
                 try
                 {
-                    string uploadUrl = this.uploadResponse.GetChild("media").GetAttribute("url");
-                    this.uploadResponse = null;
+                    string uploadUrl = uploadResponse.GetChild("media").GetAttribute("url");
 
                     Uri uri = new Uri(uploadUrl);
 

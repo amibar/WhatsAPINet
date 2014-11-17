@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using WhatsAppApi.Helper;
 using WhatsAppApi.Parser;
 using WhatsAppApi.Response;
@@ -11,6 +12,8 @@ namespace WhatsAppApi
 {
     public class WhatsSendBase : WhatsAppBase
     {
+        private int currentPollingThreadId = 0;
+
         public void Login(byte[] nextChallenge = null)
         {
             //reset stuff
@@ -56,23 +59,46 @@ namespace WhatsAppApi
 
         public bool pollMessage(bool autoReceipt = true)
         {
-            if (this.loginStatus == CONNECTION_STATUS.CONNECTED || this.loginStatus == CONNECTION_STATUS.LOGGEDIN)
+            int orgValue = Interlocked.CompareExchange(ref currentPollingThreadId, Thread.CurrentThread.ManagedThreadId, 0);
+            if (orgValue != Thread.CurrentThread.ManagedThreadId && orgValue != 0)
             {
-                byte[] nodeData;
-                try
+                throw new Exception("pollMessage is used by another thread which causes message corruption. Avoid this.");
+            }
+
+            try
+            {
+                if (this.loginStatus == CONNECTION_STATUS.CONNECTED || this.loginStatus == CONNECTION_STATUS.LOGGEDIN)
                 {
-                    nodeData = this.whatsNetwork.ReadNextNode();
-                    if (nodeData != null)
+                    byte[] nodeData;
+                    try
                     {
-                        return this.processInboundData(nodeData, autoReceipt);
+                        nodeData = this.whatsNetwork.ReadNextNode();
+                        if (nodeData != null)
+                        {
+                            return this.processInboundData(nodeData, autoReceipt);
+                        }
+                    }
+                    catch (ConnectionException)
+                    {
+                        this.Disconnect();
                     }
                 }
-                catch (ConnectionException)
+            }
+            finally
+            {
+                orgValue = Interlocked.CompareExchange(ref currentPollingThreadId, 0, Thread.CurrentThread.ManagedThreadId);
+                if (orgValue != Thread.CurrentThread.ManagedThreadId)
                 {
-                    this.Disconnect();
+                    throw new Exception("pollMessage is released by another thread!!!");
                 }
             }
+
             return false;
+        }
+
+        protected bool IsUserPolling 
+        {
+            get { return currentPollingThreadId != 0; }
         }
 
         protected ProtocolTreeNode addFeatures()
@@ -414,7 +440,12 @@ namespace WhatsAppApi
                 )
             {
                 //media upload
-                this.uploadResponse = node;
+                //this.uploadResponse = node;
+                lock (uploadResponses)
+                {
+                    string id = node.GetAttribute("id");
+                    uploadResponses[id] = node;
+                }
             }
             if (node.GetAttribute("type").Equals("result", StringComparison.OrdinalIgnoreCase)
                 && node.GetChild("picture") != null

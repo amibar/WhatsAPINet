@@ -12,7 +12,7 @@ namespace WhatsAppApi
 {
     public class WhatsAppBase : WhatsEventBase
     {
-        protected ProtocolTreeNode uploadResponse;
+        protected Dictionary<string, ProtocolTreeNode> uploadResponses;
 
         protected AccountInfo accountinfo;
 
@@ -59,6 +59,7 @@ namespace WhatsAppApi
         protected void _constructBase(string phoneNum, string imei, string nick, bool debug, bool hidden)
         {
             this.messageQueue = new List<ProtocolTreeNode>();
+            this.uploadResponses = new Dictionary<string, ProtocolTreeNode>();
             this.phoneNumber = phoneNum;
             this.password = imei;
             this.name = nick;
@@ -75,6 +76,7 @@ namespace WhatsAppApi
         {
             try
             {
+                ClearUploadResponses();
                 this.whatsNetwork.Connect();
                 this.loginStatus = CONNECTION_STATUS.CONNECTED;
                 //success
@@ -90,6 +92,7 @@ namespace WhatsAppApi
         {
             this.whatsNetwork.Disconenct();
             this.loginStatus = CONNECTION_STATUS.DISCONNECTED;
+            ClearUploadResponses();
             this.fireOnDisconnect(ex);
         }
 
@@ -144,6 +147,14 @@ namespace WhatsAppApi
         protected void SendNode(ProtocolTreeNode node)
         {
             this.SendData(this.BinWriter.Write(node));
+        }
+
+        private void ClearUploadResponses()
+        {
+            lock (uploadResponses)
+            {
+                uploadResponses.Clear();
+            }
         }
     }
 }
